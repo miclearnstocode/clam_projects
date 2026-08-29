@@ -1,0 +1,337 @@
+:root {
+    --bg-color: #f0f4f8;
+    --card-bg: #ffffff;
+    --primary-color: #1e4a6b;
+    --accent-color: #2a6496;
+    --text-main: #0b2a3e;
+    --text-secondary: #4b6a7e;
+    --border-color: #e2ebf3;
+    --alive-color: #0f6732;
+    --alive-bg: #d7f0df;
+    --dead-color: #b02b2b;
+    --dead-bg: #fceded;
+    --waiting-color: #9e7100;
+    --waiting-bg: #fef4dd;
+    --error-color: #b02b2b;
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--bg-color);
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 2rem;
+}
+
+.container {
+    width: 100%;
+    max-width: 1600px; /* Wide container for side-by-side */
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--card-bg);
+    padding: 1.5rem 2rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-icon {
+    font-size: 2rem;
+    color: var(--accent-color);
+}
+
+.header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.header h1 span {
+    font-weight: 400;
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+
+.live-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--alive-color);
+    background: var(--alive-bg);
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+/* FLEXBOX SIDE-BY-SIDE LAYOUT */
+.main-flex {
+    display: flex;
+    flex-direction: row;
+    gap: 1.5rem;
+    align-items: flex-start;
+}
+
+.left-column {
+    flex: 1.5; /* Live camera takes up 60% of the space */
+    min-width: 0; /* Prevents overflow */
+}
+
+.right-column {
+    flex: 1; /* Status and table take up 40% of the space */
+    min-width: 0; /* Prevents overflow */
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* Section Headers */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding: 0 0.5rem;
+}
+
+.section-header h2 {
+    font-size: 1.2rem;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.refresh-tag {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    background: var(--bg-color);
+    padding: 0.3rem 0.8rem;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Camera Section */
+.camera-section {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.camera-frame {
+    width: 100%;
+    height: 650px; /* Taller to match table height */
+    background: #f8fafc;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#previewImg {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.camera-error {
+    position: absolute;
+    color: var(--error-color);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Status Card */
+.status-card {
+    background: var(--card-bg);
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.status-box {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.status-left {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.status-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.5rem;
+    background: var(--waiting-bg);
+    color: var(--waiting-color);
+}
+
+.status-text h3 {
+    font-size: 1.5rem;
+    color: var(--text-main);
+    margin-bottom: 0.5rem;
+}
+
+.status-text p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.status-confidence {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--bg-color);
+    padding: 0.8rem 1.2rem;
+    border-radius: 10px;
+    color: var(--accent-color);
+}
+
+.confidence-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+
+/* Dynamic States */
+.alive .status-icon { background: var(--alive-bg); color: var(--alive-color); }
+.alive .status-text h3 { color: var(--alive-color); }
+
+.dead .status-icon { background: var(--dead-bg); color: var(--dead-color); }
+.dead .status-text h3 { color: var(--dead-color); }
+
+.waiting .status-icon { background: var(--waiting-bg); color: var(--waiting-color); }
+.waiting .status-text h3 { color: var(--waiting-color); }
+
+/* Table */
+.logs-section {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    flex: 1; /* Stretches to fill available height */
+}
+
+.table-wrap {
+    overflow-x: auto;
+    max-height: 500px; /* Limits height with scrollbar */
+    overflow-y: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+thead th {
+    text-align: left;
+    padding: 1rem;
+    background: #f7faff;
+    color: var(--text-secondary);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+}
+
+tbody td {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-main);
+}
+
+tbody tr:hover td {
+    background-color: #fafdff;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 2rem !important;
+    color: var(--text-secondary);
+}
+
+/* Badges */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.8rem;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.badge-alive { background: var(--alive-bg); color: var(--alive-color); }
+.badge-dead { background: var(--dead-bg); color: var(--dead-color); }
+.badge-error { background: #e9edf2; color: #3f5668; }
+.badge-waiting { background: var(--waiting-bg); color: var(--waiting-color); }
+
+/* Small Utilities */
+.pill {
+    font-weight: 600;
+    background: var(--bg-color);
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--accent-color);
+}
+
+.snapshot-img {
+    width: 50px;
+    height: 50px;
+    border-radius: 8px;
+    object-fit: cover;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.snapshot-img:hover {
+    transform: scale(2.5);
+    z-index: 10;
+    position: relative;
+}
+
+/* Responsive: Stacks to single column on mobile/tablet */
+@media (max-width: 1000px) {
+    body { padding: 1rem; }
+    .main-flex { 
+        flex-direction: column; 
+    }
+    .left-column, .right-column { width: 100%; flex: none; }
+    .camera-frame { height: 350px; }
+}

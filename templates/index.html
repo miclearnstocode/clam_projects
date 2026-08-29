@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pholas Orientalis Monitor</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <i class="fas fa-shell header-icon"></i>
+                <h1>Pholas Orientalis <span>monitor</span></h1>
+            </div>
+            <span class="live-indicator"><i class="fas fa-video"></i> Live Stream</span>
+        </header>
+
+        <!-- Flexbox Side-by-Side Layout -->
+        <div class="main-flex">
+
+            <!-- Left Column: Live Camera (Takes up 60% width) -->
+            <div class="left-column">
+                <section class="camera-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-video"></i> Live Camera</h2>
+                        <span class="refresh-tag"><i class="fas fa-bolt"></i> Real-time</span>
+                    </div>
+                    <div class="camera-frame">
+                        <img id="previewImg" src="/video_feed" alt="Loading Live Stream...">
+                        <div id="cameraError" class="camera-error" style="display: none;">
+                            <i class="fas fa-exclamation-triangle"></i> Camera not available
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Right Column: Status and Logs (Takes up 40% width) -->
+            <div class="right-column">
+                
+                <!-- Status Card -->
+                <section class="status-card" id="statusCard">
+                    <div class="status-box">
+                        <div class="status-left">
+                            <div class="status-icon" id="statusIcon"><i class="fas fa-circle-notch"></i></div>
+                            <div class="status-text">
+                                <h3 id="statusText">Initializing...</h3>
+                                <p id="statusSub"><i class="far fa-clock"></i> Waiting for data</p>
+                            </div>
+                        </div>
+                        <div class="status-confidence">
+                            <i class="fas fa-chart-simple"></i>
+                            <div class="confidence-value">
+                                <span id="confidenceValue">—</span>%
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Recent Activity Table -->
+                <section class="logs-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-list-ul"></i> Recent Activity</h2>
+                        <span class="refresh-tag"><i class="far fa-clock"></i> 50 logs</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Status</th>
+                                    <th>Conf.</th>
+                                    <th>Snapshot</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logsBody">
+                                <tr><td colspan="4" class="empty-state"><i class="fas fa-spinner fa-pulse"></i> Loading logs...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
