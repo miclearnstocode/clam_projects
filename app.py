@@ -12,17 +12,17 @@ from flask import Flask, render_template, jsonify, send_from_directory, Response
 
 # =================== GOPRO SETTINGS ===================
 CAMERA_ID = 4  # <-- Your UVC GoPro
-CHECK_INTERVAL = 5  # Seconds between AI checks (faster now, but still not blocking the stream)
+CHECK_INTERVAL = 5  # Seconds between AI checks
 MIN_CONFIDENCE = 75  # Confidence threshold for DEAD alert
 MODEL_PATH = 'clam_model_engineered.pkl'
 FEATURES_PATH = 'feature_names.json'
 DB_NAME = 'clam_monitor.db'
-PREVIEW_DIR = 'preview'  # Folder for showing the latest frame
+PREVIEW_DIR = 'preview'
 # =====================================================
 
 app = Flask(__name__)
 
-# Global variables for camera
+# Global variables
 camera = None
 camera_lock = threading.Lock()
 latest_status = {
@@ -77,7 +77,6 @@ def get_camera():
     with camera_lock:
         if camera is None or not camera.isOpened():
             camera = cv2.VideoCapture(CAMERA_ID, cv2.CAP_DSHOW)
-            # Lower resolution for the stream processing to save CPU
             camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
             camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             camera.set(cv2.CAP_PROP_FPS, 30)
@@ -90,7 +89,7 @@ def release_camera():
             camera.release()
             camera = None
 
-# --- Feature Extraction (Returns Features AND Contour) ---
+# --- Feature Extraction ---
 def extract_features_and_contour(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -140,6 +139,15 @@ def extract_features_and_contour(frame):
     }
     return [features[name] for name in feature_names], main_contour
 
+# --- Helper to map model prediction to status ---
+def get_prediction_status(prediction):
+    if prediction == 1:
+        return "ALIVE"
+    elif prediction == 0:
+        return "DEAD"
+    else:
+        return "No Clam Detected"
+
 # --- Background Monitoring Loop (AI Detection for DB) ---
 def run_monitor():
     global latest_status
@@ -154,21 +162,28 @@ def run_monitor():
             preview_path = f"{PREVIEW_DIR}/latest.jpg"
             cv2.imwrite(preview_path, frame)
             
-            features, _ = extract_features_and_contour(frame) # Ignore contour here
+            features, _ = extract_features_and_contour(frame)
             if features is not None:
                 features_df = pd.DataFrame([features], columns=feature_names)
                 prediction = model.predict(features_df)[0]
                 prob = model.predict_proba(features_df)[0]
-                status = "ALIVE" if prediction == 1 else "DEAD"
+                status = get_prediction_status(prediction)
                 confidence = max(prob) * 100
                 details = "Standard detection"
                 
                 image_path = None
+                # Only save image if it's a high-confidence DEAD detection
                 if status == "DEAD" and confidence >= MIN_CONFIDENCE:
                     image_path = f"dead_clams/dead_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
                     cv2.imwrite(image_path, frame)
                     details = "HIGH CONFIDENCE DEAD! Image saved."
                     print(f"🔴 {details}")
+                elif status == "DEAD" and confidence < MIN_CONFIDENCE:
+                    # If low confidence on dead, consider it as no clam or hiding
+                    status = "No Clam Detected"
+                    confidence = 0.0
+                    details = "Low confidence on dead (likely hiding)"
+                    print(f"⚪ {details}")
                 
                 save_to_db(status, confidence, details, image_path)
                 latest_status = {
@@ -200,41 +215,38 @@ def generate_frames():
             time.sleep(1)
             continue
         
-        # ---------------------------------------------------------
-        # DRAW DETECTION OVERLAY ON LIVE STREAM
-        # ---------------------------------------------------------
+        # DRAW DETECTION OVERLAY
         features, contour = extract_features_and_contour(frame)
         
         if features is not None:
-            # 1. Predict using model
             features_df = pd.DataFrame([features], columns=feature_names)
             prediction = model.predict(features_df)[0]
             prob = model.predict_proba(features_df)[0]
-            status = "ALIVE" if prediction == 1 else "DEAD"
+            status = get_prediction_status(prediction)
             confidence = max(prob) * 100
 
-            # 2. Color-coded box and text
+            # Color-coded box
             if status == "ALIVE":
                 box_color = (0, 255, 0)  # Green
-            else:
+            elif status == "DEAD":
                 box_color = (0, 0, 255)  # Red
+            else:
+                box_color = (255, 255, 0) # Cyan for No Clam
 
-            # 3. Draw the Contour (The actual detected shape)
+            # Draw the Contour
             cv2.drawContours(frame, [contour], -1, box_color, 2)
 
-            # 4. Draw Bounding Box
+            # Draw Bounding Box
             x, y, w, h = cv2.boundingRect(contour)
             cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
 
-            # 5. Draw Status Text Box
+            # Draw Status Text Box
             text = f"{status} ({confidence:.1f}%)"
             cv2.rectangle(frame, (x, y - 35), (x + 320, y), box_color, cv2.FILLED)
             cv2.putText(frame, text, (x + 10, y - 10), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         
-        # ---------------------------------------------------------
-        
-        # Encode frame as JPEG and yield
+        # Encode frame
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
             continue
@@ -278,7 +290,6 @@ if __name__ == "__main__":
     init_db()
     load_model()
     
-    # Start the monitoring thread for AI detection
     monitor_thread = threading.Thread(target=run_monitor, daemon=True)
     monitor_thread.start()
     print("🔄 Background monitoring started...")
