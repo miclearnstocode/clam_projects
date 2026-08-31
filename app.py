@@ -11,7 +11,7 @@ from datetime import datetime
 from flask import Flask, render_template, jsonify, send_from_directory, Response, abort
 
 # =================== GOPRO SETTINGS ===================
-CAMERA_ID = 4  # <-- Your UVC GoPro
+CAMERA_ID = 4  # <--UVC GoPro
 CHECK_INTERVAL = 5  # Seconds between AI checks
 MIN_CONFIDENCE = 75  # Confidence threshold for DEAD alert
 MODEL_PATH = 'clam_model_engineered.pkl'
@@ -89,41 +89,94 @@ def release_camera():
             camera.release()
             camera = None
 
-# --- Feature Extraction ---
+def is_it_a_clam(features, contour, frame):
+    area = cv2.contourArea(contour)
+
+    # Must be large enough
+    if area < 10000:
+        return False
+
+    # Bubbles are perfect circles. Clams are long.
+    circularity = features[1]
+    if circularity > 0.8:
+        return False
+
+    return True
+
 def extract_features_and_contour(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    # Local variable to prevent thread fights
+    if not hasattr(extract_features_and_contour, "prev_mask"):
+        extract_features_and_contour.prev_mask = None
+
+    h, w, _ = frame.shape
+
+    # ==========================================================
+    # 1. CROP BOTTOM 40% ONLY! (Removes 100% of foam, bubbles, reflections)
+    # ==========================================================
+    cropped = frame[int(h * 0.60):, :]  # Keep only the bottom 40%
+    cropped_h, cropped_w, _ = cropped.shape
+
+    # ==========================================================
+    # 2. COLOR MASK (HSV) - Clams are BROWN/TAN, Foam is WHITE
+    # ==========================================================
+    hsv = cv2.cvtColor(cropped, cv2.COLOR_BGR2HSV)
     
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY, 11, 2)
-    
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
+    # Clams: Hue 10-35, Saturation 30-255 (Not white!)
+    lower_clam = np.array([10, 40, 40])   
+    upper_clam = np.array([35, 255, 255]) 
+    mask = cv2.inRange(hsv, lower_clam, upper_clam)
+
+    # ==========================================================
+    # 3. Morphology: Close gaps between clams, remove tiny specks
+    # ==========================================================
+    kernel = np.ones((9, 9), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+    # ==========================================================
+    # 4. Temporal Smoothing (LOCK ON!)
+    # ==========================================================
+    if extract_features_and_contour.prev_mask is None:
+        extract_features_and_contour.prev_mask = mask.copy()
+    else:
+        mask = cv2.addWeighted(extract_features_and_contour.prev_mask, 0.8, mask, 0.2, 0)
+        _, mask = cv2.threshold(mask, 50, 255, cv2.THRESH_BINARY)
+        extract_features_and_contour.prev_mask = mask.copy()
+
+    # ==========================================================
+    # 5. Find the largest brown blob (The Clams)
+    # ==========================================================
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
     if not contours:
         return None, None
-    
+
     main_contour = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(main_contour) < 5000:
-        return None, None
-    
-    x, y, w, h = cv2.boundingRect(main_contour)
-    aspect_ratio = float(w) / h if h != 0 else 0
     area = cv2.contourArea(main_contour)
+
+    if area < 8000:
+        return None, None
+
+    # Calculate features
+    x, y, w, h = cv2.boundingRect(main_contour)
+    y += int(h * 0.60)  # Add crop offset
+
+    aspect_ratio = float(w) / h if h != 0 else 0
     perimeter = cv2.arcLength(main_contour, True)
     circularity = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
-    
+
     hull = cv2.convexHull(main_contour)
     hull_area = cv2.contourArea(hull)
     solidity = float(area) / hull_area if hull_area > 0 else 0
-    
-    mask = np.zeros(frame.shape[:2], np.uint8)
-    cv2.drawContours(mask, [main_contour], -1, 255, -1)
-    mean_color = cv2.mean(frame, mask=mask)[:3]
+
+    mask_bgr = np.zeros(cropped.shape[:2], np.uint8)
+    cv2.drawContours(mask_bgr, [main_contour], -1, 255, -1)
+    mean_color = cv2.mean(cropped, mask=mask_bgr)[:3]
     mean_blue, mean_green, mean_red = mean_color
-    
-    std_dev = np.std(frame[mask == 255], axis=0)
+
+    std_dev = np.std(cropped[mask_bgr == 255], axis=0)
     std_blue, std_green, std_red = std_dev
-    
+
     features = {
         'Aspect_Ratio': aspect_ratio, 'Circularity': circularity, 'Solidity': solidity,
         'Mean_Blue': mean_blue, 'Mean_Green': mean_green, 'Mean_Red': mean_red,
@@ -139,7 +192,6 @@ def extract_features_and_contour(frame):
     }
     return [features[name] for name in feature_names], main_contour
 
-# --- Helper to map model prediction to status ---
 def get_prediction_status(prediction):
     if prediction == 1:
         return "ALIVE"
@@ -219,11 +271,18 @@ def generate_frames():
         features, contour = extract_features_and_contour(frame)
         
         if features is not None:
-            features_df = pd.DataFrame([features], columns=feature_names)
-            prediction = model.predict(features_df)[0]
-            prob = model.predict_proba(features_df)[0]
-            status = get_prediction_status(prediction)
-            confidence = max(prob) * 100
+            if not is_it_a_clam(features, contour, frame):
+                status = "No Clam Detected"
+                confidence = 0.0
+                details = "Rejected: Object is not a clam (flat surface or background)"
+                print(f"⚠️ REJECTED: {details}")
+            else:
+                # Now it's safe to run the model
+                features_df = pd.DataFrame([features], columns=feature_names)
+                prediction = model.predict(features_df)[0]
+                prob = model.predict_proba(features_df)[0]
+                status = "ALIVE" if prediction == 1 else "DEAD"
+                confidence = max(prob) * 100
 
             # Color-coded box
             if status == "ALIVE":
