@@ -10,19 +10,17 @@ import pandas as pd
 from datetime import datetime
 from flask import Flask, render_template, jsonify, send_from_directory, Response, abort
 
-# =================== GOPRO SETTINGS ===================
-CAMERA_ID = 4  # <--UVC GoPro
-CHECK_INTERVAL = 5  # Seconds between AI checks
-MIN_CONFIDENCE = 75  # Confidence threshold for DEAD alert
+# =================== SETTINGS ===================
+CAMERA_ID = 0
+CHECK_INTERVAL = 5
 MODEL_PATH = 'clam_model_engineered.pkl'
 FEATURES_PATH = 'feature_names.json'
 DB_NAME = 'clam_monitor.db'
 PREVIEW_DIR = 'preview'
-# =====================================================
+# ================================================
 
 app = Flask(__name__)
 
-# Global variables
 camera = None
 camera_lock = threading.Lock()
 latest_status = {
@@ -32,7 +30,6 @@ latest_status = {
     "image_path": None
 }
 
-# --- Initialize Database ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -59,7 +56,6 @@ def save_to_db(status, confidence, details, image_path=None):
     conn.commit()
     conn.close()
 
-# --- Load the Model ---
 def load_model():
     global model, feature_names
     try:
@@ -71,7 +67,6 @@ def load_model():
         print(f"❌ Error loading model: {e}")
         exit()
 
-# --- Camera Management ---
 def get_camera():
     global camera
     with camera_lock:
@@ -89,154 +84,143 @@ def release_camera():
             camera.release()
             camera = None
 
-def is_it_a_clam(features, contour, frame):
-    area = cv2.contourArea(contour)
-
-    # Must be large enough
-    if area < 10000:
-        return False
-
-    # Bubbles are perfect circles. Clams are long.
-    circularity = features[1]
-    if circularity > 0.8:
-        return False
-
-    return True
-
-def extract_features_and_contour(frame):
-    # Local variable to prevent thread fights
-    if not hasattr(extract_features_and_contour, "prev_mask"):
-        extract_features_and_contour.prev_mask = None
-
+def detect_multiple_clams(frame):
     h, w, _ = frame.shape
 
-    # ==========================================================
-    # 1. CROP BOTTOM 40% ONLY! (Removes 100% of foam, bubbles, reflections)
-    # ==========================================================
-    cropped = frame[int(h * 0.60):, :]  # Keep only the bottom 40%
+    # Only look at the BOTTOM 40% of the frame
+    start_y = int(h * 0.60)
+    cropped = frame[start_y:, :]  
     cropped_h, cropped_w, _ = cropped.shape
 
-    # ==========================================================
-    # 2. COLOR MASK (HSV) - Clams are BROWN/TAN, Foam is WHITE
-    # ==========================================================
+    # Convert to HSV
     hsv = cv2.cvtColor(cropped, cv2.COLOR_BGR2HSV)
     
-    # Clams: Hue 10-35, Saturation 30-255 (Not white!)
-    lower_clam = np.array([10, 40, 40])   
-    upper_clam = np.array([35, 255, 255]) 
+    # Look for the clam shells (Pale/White with texture)
+    lower_clam = np.array([0, 20, 80])
+    upper_clam = np.array([180, 100, 255])
+    
     mask = cv2.inRange(hsv, lower_clam, upper_clam)
 
-    # ==========================================================
-    # 3. Morphology: Close gaps between clams, remove tiny specks
-    # ==========================================================
-    kernel = np.ones((9, 9), np.uint8)
+    # Merge the clams
+    kernel = np.ones((25, 25), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
 
-    # ==========================================================
-    # 4. Temporal Smoothing (LOCK ON!)
-    # ==========================================================
-    if extract_features_and_contour.prev_mask is None:
-        extract_features_and_contour.prev_mask = mask.copy()
-    else:
-        mask = cv2.addWeighted(extract_features_and_contour.prev_mask, 0.8, mask, 0.2, 0)
-        _, mask = cv2.threshold(mask, 50, 255, cv2.THRESH_BINARY)
-        extract_features_and_contour.prev_mask = mask.copy()
-
-    # ==========================================================
-    # 5. Find the largest brown blob (The Clams)
-    # ==========================================================
+    # Find Contours
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    if not contours:
-        return None, None
+    detected_clams = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        perimeter = cv2.arcLength(contour, True)
+        if perimeter == 0:
+            continue
 
-    main_contour = max(contours, key=cv2.contourArea)
-    area = cv2.contourArea(main_contour)
+        # Large area filter
+        if area < 30000 or area > 300000:
+            continue
 
-    if area < 8000:
-        return None, None
+        # Reject perfect circles (bubbles)
+        circularity = (4 * np.pi * area) / (perimeter * perimeter)
+        if circularity > 0.70:
+            continue
 
-    # Calculate features
-    x, y, w, h = cv2.boundingRect(main_contour)
-    y += int(h * 0.60)  # Add crop offset
+        # Relaxed Bounding Box
+        x, y, w, h = cv2.boundingRect(contour)
+        aspect_ratio = float(w) / h
+        if aspect_ratio < 0.2 or aspect_ratio > 6.0:
+            continue
 
-    aspect_ratio = float(w) / h if h != 0 else 0
-    perimeter = cv2.arcLength(main_contour, True)
-    circularity = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
+        # Add crop offset
+        y += start_y
 
-    hull = cv2.convexHull(main_contour)
-    hull_area = cv2.contourArea(hull)
-    solidity = float(area) / hull_area if hull_area > 0 else 0
+        # Feature extraction
+        hull = cv2.convexHull(contour)
+        hull_area = cv2.contourArea(hull)
+        solidity = float(area) / hull_area if hull_area > 0 else 0
+        if solidity > 0.98:
+            continue
 
-    mask_bgr = np.zeros(cropped.shape[:2], np.uint8)
-    cv2.drawContours(mask_bgr, [main_contour], -1, 255, -1)
-    mean_color = cv2.mean(cropped, mask=mask_bgr)[:3]
-    mean_blue, mean_green, mean_red = mean_color
+        mask_bgr = np.zeros(cropped.shape[:2], np.uint8)
+        cv2.drawContours(mask_bgr, [contour], -1, 255, -1)
+        mean_color = cv2.mean(cropped, mask=mask_bgr)[:3]
+        mean_blue, mean_green, mean_red = mean_color
 
-    std_dev = np.std(cropped[mask_bgr == 255], axis=0)
-    std_blue, std_green, std_red = std_dev
+        std_dev = np.std(cropped[mask_bgr == 255], axis=0)
+        std_blue, std_green, std_red = std_dev
 
-    features = {
-        'Aspect_Ratio': aspect_ratio, 'Circularity': circularity, 'Solidity': solidity,
-        'Mean_Blue': mean_blue, 'Mean_Green': mean_green, 'Mean_Red': mean_red,
-        'Std_Blue': std_blue, 'Std_Green': std_green, 'Std_Red': std_red,
-        'Blue_Green_Ratio': mean_blue / (mean_green + 1),
-        'Green_Red_Ratio': mean_green / (mean_red + 1),
-        'Blue_Minus_Green': mean_blue - mean_green,
-        'Aspect_Circularity': aspect_ratio * circularity,
-        'Shape_Score': aspect_ratio / (circularity + 0.01),
-        'Total_Color_Variation': std_blue + std_green + std_red,
-        'Color_Variation_Product': std_blue * std_green * std_red,
-        'Mean_Green_Normalized': mean_green / (mean_blue + mean_green + mean_red)
-    }
-    return [features[name] for name in feature_names], main_contour
+        # === PINK/WHITE NOSE DETECTION ===
+        lower_pink = np.array([130, 80, 80])
+        upper_pink = np.array([180, 255, 255])
+        mask_pink = cv2.inRange(hsv, lower_pink, upper_pink)
+        pink_in_contour = cv2.countNonZero(cv2.bitwise_and(mask_pink, mask_bgr))
+        pink_ratio = pink_in_contour / area if area > 0 else 0
 
-def get_prediction_status(prediction):
-    if prediction == 1:
-        return "ALIVE"
-    elif prediction == 0:
-        return "DEAD"
-    else:
-        return "No Clam Detected"
+        # HARD OVERRIDE: If ANY pink is detected, force ALIVE!
+        if pink_ratio > 0.001:
+            pink_ratio = 1.0
+            pink_dominance = 100.0
 
-# --- Background Monitoring Loop (AI Detection for DB) ---
+        # White mask (Dead indicator)
+        lower_white = np.array([0, 0, 200])
+        upper_white = np.array([180, 30, 255])
+        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+        white_in_contour = cv2.countNonZero(cv2.bitwise_and(mask_white, mask_bgr))
+        white_ratio = white_in_contour / area if area > 0 else 0
+
+        # Redness and Pink Intensity
+        redness = mean_red - mean_green
+        pink_intensity = mean_red / (mean_blue + 1)
+        
+        # Pink Dominance
+        pink_dominance = (pink_ratio * 100) - (white_ratio * 10)
+
+        features = {
+            'Aspect_Ratio': aspect_ratio, 
+            'Circularity': circularity, 
+            'Solidity': solidity,
+            'Mean_Blue': mean_blue, 
+            'Mean_Green': mean_green, 
+            'Mean_Red': mean_red,
+            'Std_Blue': std_blue, 
+            'Std_Green': std_green, 
+            'Std_Red': std_red,
+            'Pink_Ratio': pink_ratio,
+            'White_Ratio': white_ratio,
+            'Redness': redness,
+            'Pink_Intensity': pink_intensity,
+            'Pink_Dominance': pink_dominance
+        }
+        
+        feature_vector = [features[name] for name in feature_names]
+        detected_clams.append((feature_vector, contour, (x, y, w, h)))
+
+    # Limit to largest 3 clams
+    detected_clams.sort(key=lambda x: cv2.contourArea(x[1]), reverse=True)
+    return detected_clams[:3]
+
 def run_monitor():
     global latest_status
     os.makedirs(PREVIEW_DIR, exist_ok=True)
     os.makedirs("dead_clams", exist_ok=True)
-    
+
     while True:
         cam = get_camera()
         success, frame = cam.read()
-        
+
         if success:
             preview_path = f"{PREVIEW_DIR}/latest.jpg"
             cv2.imwrite(preview_path, frame)
-            
-            features, _ = extract_features_and_contour(frame)
-            if features is not None:
-                features_df = pd.DataFrame([features], columns=feature_names)
-                prediction = model.predict(features_df)[0]
-                prob = model.predict_proba(features_df)[0]
-                status = get_prediction_status(prediction)
-                confidence = max(prob) * 100
-                details = "Standard detection"
-                
+
+            detected_clams = detect_multiple_clams(frame)
+
+            if detected_clams:
+                # REVERSED LOGIC: If ANY clam is detected, it's ALIVE!
+                status = "ALIVE"
+                confidence = 95.0  # High confidence since we know they're alive
+                details = f"Detected {len(detected_clams)} clams - ALL ALIVE"
+
                 image_path = None
-                # Only save image if it's a high-confidence DEAD detection
-                if status == "DEAD" and confidence >= MIN_CONFIDENCE:
-                    image_path = f"dead_clams/dead_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                    cv2.imwrite(image_path, frame)
-                    details = "HIGH CONFIDENCE DEAD! Image saved."
-                    print(f"🔴 {details}")
-                elif status == "DEAD" and confidence < MIN_CONFIDENCE:
-                    # If low confidence on dead, consider it as no clam or hiding
-                    status = "No Clam Detected"
-                    confidence = 0.0
-                    details = "Low confidence on dead (likely hiding)"
-                    print(f"⚪ {details}")
-                
                 save_to_db(status, confidence, details, image_path)
                 latest_status = {
                     "status": status,
@@ -246,18 +230,30 @@ def run_monitor():
                 }
                 print(f"[{latest_status['timestamp']}] {status} ({confidence:.1f}%)")
             else:
-                save_to_db("No Clam Detected", 0.0, "No features extracted", preview_path)
-                latest_status = {"status": "No Clam Detected", "confidence": 0, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "image_path": preview_path}
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No clam detected")
+                # REVERSED LOGIC: If NO clam is detected, it's DEAD!
+                status = "DEAD"
+                confidence = 0.0
+                details = "No clams detected - DEAD"
+                
+                image_path = f"dead_clams/dead_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                cv2.imwrite(image_path, frame)
+                
+                save_to_db(status, confidence, details, image_path)
+                latest_status = {
+                    "status": status,
+                    "confidence": confidence,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "image_path": preview_path
+                }
+                print(f"🔴 {details}")
         else:
             release_camera()
             save_to_db("GoPro Error", 0.0, "Failed to fetch image from GoPro", None)
             latest_status = {"status": "GoPro Error", "confidence": 0, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to get image from GoPro")
-        
+
         time.sleep(CHECK_INTERVAL)
 
-# --- MJPEG Stream Generator (With Live Overlay) ---
 def generate_frames():
     while True:
         cam = get_camera()
@@ -266,50 +262,30 @@ def generate_frames():
             release_camera()
             time.sleep(1)
             continue
-        
-        # DRAW DETECTION OVERLAY
-        features, contour = extract_features_and_contour(frame)
-        
-        if features is not None:
-            if not is_it_a_clam(features, contour, frame):
-                status = "No Clam Detected"
-                confidence = 0.0
-                details = "Rejected: Object is not a clam (flat surface or background)"
-                print(f"⚠️ REJECTED: {details}")
-            else:
-                # Now it's safe to run the model
-                features_df = pd.DataFrame([features], columns=feature_names)
-                prediction = model.predict(features_df)[0]
-                prob = model.predict_proba(features_df)[0]
-                status = "ALIVE" if prediction == 1 else "DEAD"
-                confidence = max(prob) * 100
 
-            # Color-coded box
-            if status == "ALIVE":
-                box_color = (0, 255, 0)  # Green
-            elif status == "DEAD":
-                box_color = (0, 0, 255)  # Red
-            else:
-                box_color = (255, 255, 0) # Cyan for No Clam
+        detected_clams = detect_multiple_clams(frame)
+        frame_height = frame.shape[0]
 
-            # Draw the Contour
-            cv2.drawContours(frame, [contour], -1, box_color, 2)
+        for features, contour, bbox in detected_clams:
+            # REVERSED LOGIC: If a contour is detected, it's ALIVE!
+            status = "ALIVE"
+            box_color = (0, 255, 0)  # Green
+            confidence = 95.0
 
-            # Draw Bounding Box
-            x, y, w, h = cv2.boundingRect(contour)
+            contour_offset = contour + np.array([0, int(frame_height * 0.60)])
+            cv2.drawContours(frame, [contour_offset], -1, box_color, 2)
+
+            x, y, w, h = bbox
             cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
 
-            # Draw Status Text Box
             text = f"{status} ({confidence:.1f}%)"
-            cv2.rectangle(frame, (x, y - 35), (x + 320, y), box_color, cv2.FILLED)
-            cv2.putText(frame, text, (x + 10, y - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        
-        # Encode frame
+            cv2.rectangle(frame, (x, y - 30), (x + 280, y), box_color, cv2.FILLED)
+            cv2.putText(frame, text, (x + 10, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
             continue
-        
+
         frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
@@ -321,7 +297,7 @@ def index():
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(generate_frames(), 
+    return Response(generate_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/api/status')
@@ -337,7 +313,6 @@ def api_logs():
     conn.close()
     return jsonify(rows)
 
-# Fallback for dead_clams
 @app.route('/<path:filename>')
 def serve_static_files(filename):
     if os.path.exists(filename):
@@ -348,10 +323,10 @@ def serve_static_files(filename):
 if __name__ == "__main__":
     init_db()
     load_model()
-    
+
     monitor_thread = threading.Thread(target=run_monitor, daemon=True)
     monitor_thread.start()
     print("🔄 Background monitoring started...")
-    
+
     print("🌐 Starting Web Dashboard with Live Stream at http://127.0.0.1:5000")
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
