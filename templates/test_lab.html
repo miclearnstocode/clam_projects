@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clam Detection Test Lab</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f4f4; text-align: center; padding: 20px; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        input[type="file"] { padding: 10px; margin: 10px; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        img, video { max-width: 100%; border-radius: 10px; margin-top: 20px; border: 2px solid #ddd; }
+        h1 { color: #333; }
+        .note { color: #666; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🐚 Clam Detection Test Lab</h1>
+        
+        <!-- Image Upload -->
+        <div>
+            <h3>1. Upload an Image</h3>
+            <form action="/test_image" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file" accept="image/*" required>
+                <button type="submit">Analyze Image</button>
+            </form>
+            {% if image_result %}
+                <h4>Image Result:</h4>
+                <img src="{{ image_result }}" alt="Result">
+            {% endif %}
+        </div>
+
+        <hr>
+
+        <!-- Video Upload -->
+        <div>
+            <h3>2. Upload a Video</h3>
+            <form action="/test_video" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file" accept="video/*" required>
+                <button type="submit">Analyze Video</button>
+            </form>
+            {% if video_result %}
+                <h4>Video Result:</h4>
+                <video width="100%" controls>
+                    <source src="{{ video_result }}" type="video/mp4">
+                </video>
+            {% endif %}
+        </div>
+
+        <hr>
+
+        <!-- Webcam Test -->
+        <div>
+            <h3>3. Live Webcam (Camera ID: 4)</h3>
+            <a href="{{ url_for('webcam_feed') }}"><button>Start Live Camera</button></a>
+        </div>
+
+        <p class="note">Note: Uses your `clam_model_engineered.pkl`</p>
+    </div>
+</body>
+</html>

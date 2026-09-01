@@ -156,11 +156,6 @@ def detect_multiple_clams(frame):
         pink_in_contour = cv2.countNonZero(cv2.bitwise_and(mask_pink, mask_bgr))
         pink_ratio = pink_in_contour / area if area > 0 else 0
 
-        # HARD OVERRIDE: If ANY pink is detected, force ALIVE!
-        if pink_ratio > 0.001:
-            pink_ratio = 1.0
-            pink_dominance = 100.0
-
         # White mask (Dead indicator)
         lower_white = np.array([0, 0, 200])
         upper_white = np.array([180, 30, 255])
@@ -199,6 +194,14 @@ def detect_multiple_clams(frame):
     detected_clams.sort(key=lambda x: cv2.contourArea(x[1]), reverse=True)
     return detected_clams[:3]
 
+def get_prediction_status(prediction):
+    # REVERSED LOGIC: If model says 0 (Dead) -> Show ALIVE
+    # If model says 1 (Alive) -> Show DEAD
+    if prediction == 0:
+        return "ALIVE"
+    else:
+        return "DEAD"
+
 def run_monitor():
     global latest_status
     os.makedirs(PREVIEW_DIR, exist_ok=True)
@@ -215,12 +218,37 @@ def run_monitor():
             detected_clams = detect_multiple_clams(frame)
 
             if detected_clams:
-                # REVERSED LOGIC: If ANY clam is detected, it's ALIVE!
-                status = "ALIVE"
-                confidence = 95.0  # High confidence since we know they're alive
-                details = f"Detected {len(detected_clams)} clams - ALL ALIVE"
+                all_statuses = []
+                all_confidences = []
+
+                for features, _, _ in detected_clams:
+                    features_df = pd.DataFrame([features], columns=feature_names)
+                    prediction = model.predict(features_df)[0]
+                    prob = model.predict_proba(features_df)[0]
+                    
+                    # REVERSED LOGIC: Invert the prediction!
+                    current_status = "ALIVE" if prediction == 0 else "DEAD"
+                    confidence = max(prob) * 100
+
+                    all_statuses.append(current_status)
+                    all_confidences.append(confidence)
+
+                # If ANY clam is ALIVE, the whole tank is ALIVE!
+                if "ALIVE" in all_statuses:
+                    status = "ALIVE"
+                else:
+                    status = "DEAD"
+                
+                confidence = max(all_confidences)
+                details = f"Detected {len(detected_clams)} clams"
 
                 image_path = None
+                if status == "DEAD":
+                    image_path = f"dead_clams/dead_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                    cv2.imwrite(image_path, frame)
+                    details = "DEAD DETECTED! Image saved."
+                    print(f"🔴 {details}")
+
                 save_to_db(status, confidence, details, image_path)
                 latest_status = {
                     "status": status,
@@ -230,22 +258,9 @@ def run_monitor():
                 }
                 print(f"[{latest_status['timestamp']}] {status} ({confidence:.1f}%)")
             else:
-                # REVERSED LOGIC: If NO clam is detected, it's DEAD!
-                status = "DEAD"
-                confidence = 0.0
-                details = "No clams detected - DEAD"
-                
-                image_path = f"dead_clams/dead_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                cv2.imwrite(image_path, frame)
-                
-                save_to_db(status, confidence, details, image_path)
-                latest_status = {
-                    "status": status,
-                    "confidence": confidence,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "image_path": preview_path
-                }
-                print(f"🔴 {details}")
+                save_to_db("No Clam Detected", 0.0, "No features extracted", preview_path)
+                latest_status = {"status": "No Clam Detected", "confidence": 0, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "image_path": preview_path}
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No clam detected")
         else:
             release_camera()
             save_to_db("GoPro Error", 0.0, "Failed to fetch image from GoPro", None)
@@ -267,10 +282,19 @@ def generate_frames():
         frame_height = frame.shape[0]
 
         for features, contour, bbox in detected_clams:
-            # REVERSED LOGIC: If a contour is detected, it's ALIVE!
-            status = "ALIVE"
-            box_color = (0, 255, 0)  # Green
-            confidence = 95.0
+            features_df = pd.DataFrame([features], columns=feature_names)
+            prediction = model.predict(features_df)[0]
+            prob = model.predict_proba(features_df)[0]
+            
+            # REVERSED LOGIC: Invert the prediction!
+            if prediction == 0:
+                status = "ALIVE"
+                box_color = (0, 255, 0)  # Green
+            else:
+                status = "DEAD"
+                box_color = (0, 0, 255)  # Red
+
+            confidence = max(prob) * 100
 
             contour_offset = contour + np.array([0, int(frame_height * 0.60)])
             cv2.drawContours(frame, [contour_offset], -1, box_color, 2)

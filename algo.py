@@ -7,25 +7,12 @@ import joblib
 import json
 
 # Load dataset
-df = pd.read_csv("clam_dataset_202.csv")
+df = pd.read_csv("clam_dataset_nose.csv")
 print(f"Original dataset: {len(df)} samples")
-
-# --- ENGINEER FEATURES ---
-df['Blue_Green_Ratio'] = df['Mean_Blue'] / (df['Mean_Green'] + 1)
-df['Green_Red_Ratio'] = df['Mean_Green'] / (df['Mean_Red'] + 1)
-df['Blue_Minus_Green'] = df['Mean_Blue'] - df['Mean_Green']
-df['Aspect_Circularity'] = df['Aspect_Ratio'] * df['Circularity']
-df['Shape_Score'] = df['Aspect_Ratio'] / (df['Circularity'] + 0.01)
-df['Total_Color_Variation'] = df['Std_Blue'] + df['Std_Green'] + df['Std_Red']
-df['Color_Variation_Product'] = df['Std_Blue'] * df['Std_Green'] * df['Std_Red']
-df['Mean_Green_Normalized'] = df['Mean_Green'] / (df['Mean_Blue'] + df['Mean_Green'] + df['Mean_Red'])
-
-print(f"After feature engineering: {len(df.columns)} features")
 
 # Check class balance
 print(f"Alive (Label=1): {len(df[df['Label']==1])}")
 print(f"Dead (Label=0): {len(df[df['Label']==0])}")
-print(f"No Clam (Label=2): {len(df[df['Label']==2])}")
 
 # Separate features and labels
 X = df.drop("Label", axis=1)
@@ -35,13 +22,14 @@ y = df["Label"]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
 # Train model
+# IMPORTANT: Increase Alive weight to 10.0! This forces the model to REALLY look for pink noses.
 model = RandomForestClassifier(
-    n_estimators=100,
-    max_depth=5,
-    min_samples_split=10,
-    min_samples_leaf=5,
+    n_estimators=300,          # More trees = more stable
+    max_depth=15,              # Deeper trees to learn complex pink patterns
+    min_samples_split=2,
+    min_samples_leaf=1,
     random_state=42,
-    class_weight={0: 1.5, 1: 1.5, 2: 2.5},  # Give 'No Clam' a higher weight
+    class_weight={0: 0.5, 1: 10.0},  # CRITICAL: Alive is 10x more important than Dead
     oob_score=True
 )
 model.fit(X_train, y_train)
@@ -52,7 +40,14 @@ accuracy = accuracy_score(y_test, y_pred)
 print(f"\nTest Accuracy: {accuracy * 100:.2f}%")
 
 print("\nClassification Report:")
-print(classification_report(y_test, y_pred, target_names=['Dead', 'Alive', 'No Clam']))
+print(classification_report(y_test, y_pred, target_names=['Dead', 'Alive']))
+
+# Print feature importance to verify Pink_Dominance is top
+importances = model.feature_importances_
+indices = np.argsort(importances)[::-1]
+print("\nTop 5 Most Important Features:")
+for i in range(5):
+    print(f"{X.columns[indices[i]]}: {importances[indices[i]]:.3f}")
 
 # Save model
 joblib.dump(model, 'clam_model_engineered.pkl')

@@ -1,1 +1,1 @@
-["Aspect_Ratio", "Circularity", "Solidity", "Mean_Blue", "Mean_Green", "Mean_Red", "Std_Blue", "Std_Green", "Std_Red", "Blue_Green_Ratio", "Green_Red_Ratio", "Blue_Minus_Green", "Aspect_Circularity", "Shape_Score", "Total_Color_Variation", "Color_Variation_Product", "Mean_Green_Normalized"]
+["Aspect_Ratio", "Circularity", "Solidity", "Mean_Blue", "Mean_Green", "Mean_Red", "Std_Blue", "Std_Green", "Std_Red", "Pink_Ratio", "White_Ratio", "Redness", "Pink_Intensity", "Pink_Dominance"]
