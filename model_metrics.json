@@ -2,6 +2,16 @@
     "accuracy": 0.8709677419354839,
     "auc_score": 0.9303135888501741,
     "auc_interpretation": "Excellent",
+    "confusion_matrix": {
+        "true_negatives": 16,
+        "false_positives": 5,
+        "false_negatives": 3,
+        "true_positives": 38
+    },
+    "sensitivity": 0.926829268292683,
+    "specificity": 0.7619047619047619,
+    "precision_healthy": 0.8837209302325582,
+    "precision_at_risk": 0.8421052631578947,
     "n_estimators": 300,
     "max_depth": 15,
     "class_weight": {
