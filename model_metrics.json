@@ -1,0 +1,11 @@
+{
+    "accuracy": 0.8709677419354839,
+    "auc_score": 0.9303135888501741,
+    "auc_interpretation": "Excellent",
+    "n_estimators": 300,
+    "max_depth": 15,
+    "class_weight": {
+        "0": 0.5,
+        "1": 10.0
+    }
+}
