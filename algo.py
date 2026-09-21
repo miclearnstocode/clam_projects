@@ -23,15 +23,13 @@ y = df["Label"]
 # Split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-# Train model
-# IMPORTANT: Increase Healthy weight to 10.0! This forces the model to REALLY look for pink noses.
 model = RandomForestClassifier(
-    n_estimators=300,          # More trees = more stable
-    max_depth=15,              # Deeper trees to learn complex pink patterns
+    n_estimators=300,     
+    max_depth=15,        
     min_samples_split=2,
     min_samples_leaf=1,
     random_state=42,
-    class_weight={0: 0.5, 1: 10.0},  # CRITICAL: Healthy is 10x more important than At Risk
+    class_weight={0: 0.5, 1: 10.0}, 
     oob_score=True
 )
 model.fit(X_train, y_train)

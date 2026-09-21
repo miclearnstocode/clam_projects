@@ -11,7 +11,7 @@ from datetime import datetime
 from flask import Flask, render_template, jsonify, send_from_directory, Response, abort
 
 # =================== SETTINGS ===================
-CAMERA_ID = 0
+CAMERA_ID = 4 #0
 CHECK_INTERVAL = 5
 MODEL_PATH = 'clam_model_engineered.pkl'
 FEATURES_PATH = 'feature_names.json'
